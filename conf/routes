@@ -1,0 +1,1 @@
+GET           /api/sales              controllers.Application.listSales(since: Option[String], until: Option[String], limit: Option[Int], before: Option[Long], after: Option[Long], order: Option[String])
