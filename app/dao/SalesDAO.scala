@@ -2,8 +2,10 @@ package dao
 
 import models.Cursor.{firstPage, page}
 import models.{Cursor, Sale}
-import play.api.Configuration
+import org.h2.tools.Server
 import play.api.db.slick.{DatabaseConfigProvider, HasDatabaseConfigProvider}
+import play.api.inject.ApplicationLifecycle
+import play.api.{Configuration, Logging}
 import slick.jdbc.JdbcProfile
 
 import java.sql.Timestamp
@@ -32,10 +34,34 @@ sealed trait SalesComponent {
 @Singleton()
 class SalesDAO @Inject() (
     configuration: Configuration,
+    applicationLifecycle: ApplicationLifecycle,
     protected val dbConfigProvider: DatabaseConfigProvider
 )(implicit executionContext: ExecutionContext)
     extends SalesComponent
-    with HasDatabaseConfigProvider[JdbcProfile] {
+    with HasDatabaseConfigProvider[JdbcProfile]
+    with Logging {
+
+  val server = Server
+    .createTcpServer(
+      "-tcp",
+      "-tcpAllowOthers",
+      "-tcpPort",
+      configuration
+        .getOptional[String]("app.h2.server.port")
+        .getOrElse("9092"),
+      "-tcpDaemon"
+    )
+    .start()
+  logger.info(
+    "started H2 tcp server! You can access it with 'jdbc:h2:tcp://localhost:9092/mem:play'"
+  )
+  applicationLifecycle.addStopHook(() =>
+    Future {
+      logger.info("shutting down H2 tcp server")
+      server.shutdown()
+    }
+  )
+
   import profile.api._
   val sales = TableQuery[Sales]
   private val cursorDefaultLimit =
@@ -48,13 +74,12 @@ class SalesDAO @Inject() (
       end: LocalDateTime,
       desc: Boolean = true,
       size: Option[Int] = None
-  ): Future[(Seq[Sale], Option[Cursor], Int)] =
-    for {
-      (sales, limit) <- find(start, end, defaultSize(size), desc)
-      count <- count(between(start, end))
-    } yield firstPage(sales, limit) match {
-      case (sales, cursor) => (sales, cursor, count)
-    }
+  ): Future[(Seq[Sale], Option[Cursor], Int)] = for {
+    (sales, limit) <- find(start, end, defaultSize(size), desc)
+    count <- count(between(start, end))
+  } yield firstPage(sales, limit) match {
+    case (sales, cursor) => (sales, cursor, count)
+  }
 
   private def find(
       start: LocalDateTime,
